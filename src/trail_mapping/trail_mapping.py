@@ -91,10 +91,10 @@ def plot_stats(gpx):
         ('Date', start_time.strftime("%Y-%m-%d") if start_time else '-'),
         ('Distance', f"{round(distance_from_start / 1000, 2)} km"),
         ('Duration', str(datetime.timedelta(seconds=duration)) if duration else '-'),
-        ('Lowest', f"{int(lowest)} m"),
-        ('Highest', f"{int(highest)} m"),
-        ('Uphill', f"{int(uphill)} m"),
-        ('Downhill', f"{int(downhill)} m"),
+        ('Lowest', f"{int(lowest)} m" if lowest else '-'),
+        ('Highest', f"{int(highest)} m" if highest else '-'),
+        ('Uphill', f"{int(uphill)} m" if uphill else '-'),
+        ('Downhill', f"{int(downhill)} m" if downhill else '-'),
     ]
 
     stats_formatted = [
@@ -114,6 +114,10 @@ def plot_elevation(gpx):
     px = [p.distance_from_start / 1000 for p in points]
     py = [p.point.elevation for p in points]
 
+    # if there is no elevation data, create zeros
+    for i, v in enumerate(py):
+        py[i] = 0 if v == None else v
+    
     x_scale, y_scale = LinearScale(), LinearScale()
     x_scale.allow_padding = False
     x_ax = Axis(label='Distance (km)', scale=x_scale)
