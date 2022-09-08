@@ -184,8 +184,9 @@ def link_trace_elevation(trace, elevation, gpx, debug):
     brushintsel.observe(update_range, 'selected')
 
 
-def plot_gpx(gpx_file):
-    gpx = parse_data(gpx_file)
+def plot_gpx(gpx_filename):
+    with open(gpx_filename) as gpx_file:
+        gpx = parse_data(gpx_file)
 
     stats = plot_stats(gpx)
     trace = plot_map(gpx)
