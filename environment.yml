@@ -1,4 +1,4 @@
-name: voila-gpx-viewer
+name: gpx-analytics
 channels:
 - conda-forge
 dependencies:
@@ -11,3 +11,7 @@ dependencies:
 - python=3.10
 - srtm.py=0.3
 - voila=0.3
+- geopy=2.2
+- matplotlib=3.5
+- plotly=5.9
+- windrose=1.7
