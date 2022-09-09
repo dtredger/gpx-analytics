@@ -436,7 +436,7 @@ class SailingSession:
         self.set_transitions(df)
         self.set_stats()
 
-    def windrose(self, use_calculated_wind_dir=True):
+    def polar(self, use_calculated_wind_dir=True):
         if use_calculated_wind_dir is True:
             wind_dir = self.calculated_wind_dir
         else:
