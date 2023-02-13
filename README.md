@@ -1,4 +1,19 @@
-# voila-gpx-viewer
+# GPX Analytics
+
+This is a jupyter notebook to analyze GPX files. In this case, it is targeted at analysis of GPS traces of sailing.
+The logic is a mashup of 
+-  [voila-gpx-viewer](https://github.com/jtpio/voila-gpx-viewer)
+
+
+### Features
+
+Sailing analytics relies on:
+- GPS trace map (to see what's what)
+- Speed 
+- Polar diagram (speed vs True Wind angle)
+- 
+
+
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/jtpio/voila-gpx-viewer/master?urlpath=voila%2Frender%2Fapp.ipynb)
 

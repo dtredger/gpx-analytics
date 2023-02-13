@@ -425,6 +425,18 @@ class SailingSession:
         params = self.params
 
         t = time.time()
+        # TODO - point_list seems redundant
+        # [GPXTrackPoint(43.637682991142974, -79.33771289892432, elevation=69.35479736328125, time=datetime.datetime(2022, 9, 6, 22, 38, 8, tzinfo=SimpleTZ("Z"))),
+        # GPXTrackPoint(43.63779480573128, -79.33770401410696, elevation=75.71328353881836, time=datetime.datetime(2022, 9, 6, 22, 38, 10, tzinfo=SimpleTZ("Z")))]
+        
+        # [[-79.33771289892432,
+        #   43.637682991142974,
+        #   69.35479736328125,
+        #   datetime.datetime(2022, 9, 6, 18, 38, 8, tzinfo=<DstTzInfo 'US/Eastern' EDT-1 day, 20:00:00 DST>)],
+        #  [-79.33770401410696,
+        #   43.63779480573128,
+        #   75.71328353881836,
+        #   datetime.datetime(2022, 9, 6, 18, 38, 10, tzinfo=<DstTzInfo 'US/Eastern' EDT-1 day, 20:00:00 DST>)]]
         gpx_data, point_list = self.get_gpx_points_list(gpx)
         df = self.create_dataframe(gpx_data, point_list)
         self.df = df
