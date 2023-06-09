@@ -169,13 +169,13 @@ def parse_maneuvers(sog_kts, tack_raw, upwind, params):
                 is_moving[i] = 0
                 moving_segments.append(cnt)
                 crashes.append(i)
-                is_moving[
-                max(i - 2 * params["window_size"], 0):i] = 0  # Reset time before crash to not moving to clean up data
+                is_moving[max(i - 2 * params["window_size"], 0):i] = 0  # Reset time before crash to not moving to clean up data
 
                 tack_before_crash = tack[max(i - 2 * params["window_size"], 0)]
                 upwind_before_crash = upwind[max(i - 2 * params["window_size"], 0)]
-                if tack_before_crash == 0:
-                    tack_before_crash = np.median([x for x in tack[max(i - 2 * params["window_size"], 0):i] if x != 0])
+                # TODO: can raise `Mean of empty slice.`
+                # if tack_before_crash == 0:
+                #     tack_before_crash = np.median([x for x in tack[max(i - 2 * params["window_size"], 0):i] if x != 0])
                 if tack_before_crash == 1:  # port tack
                     port_crashes.append(i)
                 else:

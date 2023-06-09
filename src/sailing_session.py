@@ -9,12 +9,14 @@ import gpxpy
 from utils import *
 
 
+np.seterr('raise')
 
 
 # Create a new session from a file
 class SailingSession:
     default_params = {
-        # "wind_dir":    
+        "debug": True,
+        # "wind_dir":
         "min_sailing_kts": 1.0,
         "window_size": 5, # TODO: should be time, not number of points?
         # "kts_speed_cap": 40,
@@ -24,9 +26,9 @@ class SailingSession:
     ### Load data from file. 
     # If data is not included, speed and course data can be calculated.
     # There is no way to infer: hdg_true, roll, or pitch
-    def __init__(self, file_path, params=None):
-        self.debug = True
-        self.params = self.default_params
+    def __init__(self, file_path, params={}):
+        self.params = self.default_params | params
+        self.debug = self.params["debug"]
 
         if file_path.endswith('.csv'):
             self.from_vakaros_csv(file_path)
@@ -91,7 +93,7 @@ class SailingSession:
     def add_time_steps(self):
         start_time = time.time()
 
-        self.df["time_diff"] = [0] + [
+        self.df["time_diff"] = [1] + [
             (self.df.loc[i].timestamp - self.df.loc[i - 1].timestamp).total_seconds() 
         for i in range(1, len(self.df))]
 
@@ -144,6 +146,8 @@ class SailingSession:
     # Direction is compass heading set to `self.calculated_wind_dir` 
     def set_inferred_wind_dir(self):
         if "wind_dir" in self.params:
+            if self.debug:
+                print(f"using preset wind_dir {self.params['wind_dir']}")
             self.preset_wind_dir = self.params["wind_dir"]
 
         # Only points with speeds faster than min_sailing_kts will be used
@@ -153,6 +157,8 @@ class SailingSession:
                 self.df[moving_locs]["cog"].values, 
                 self.df[moving_locs]["sog_kts"].values
             )
+        if self.debug:
+            print(f"calculated wind_dir as {self.calculated_wind_dir}")
 
 
     # set VMG (based on straight upwind, straight downwind), and what tack we are on (1 for Starboard)
@@ -217,7 +223,7 @@ class SailingSession:
         tack = df["tack"][0]
 
         tacks = []
-        jibes = []
+        gybes = []
 
         for i in range(len(df)):
             if tack != df["tack"][i]:
@@ -228,8 +234,8 @@ class SailingSession:
                         tacks.append(i)
                         transitions.append([i, "Port", "Tack"])
                     elif df["upwind"][i] == -1:
-                        jibes.append(i)
-                        transitions.append([i, "Port", "Jibe"])
+                        gybes.append(i)
+                        transitions.append([i, "Port", "Gybe"])
                 if tack == -1 and df["tack"][i] == 1:
                     transitions_starboard.append(i)
 
@@ -237,19 +243,24 @@ class SailingSession:
                         tacks.append(i)
                         transitions.append([i, "Starboard", "Tack"])
                     elif df["upwind"][i] == -1:
-                        jibes.append(i)
-                        transitions.append([i, "Starboard", "Jibe"])
+                        gybes.append(i)
+                        transitions.append([i, "Starboard", "Gybe"])
 
                 tack = df["tack"][i]
 
         self.transitions_df = pd.DataFrame(data=transitions, columns=["Loc", "Tack", "Maneuver"])
         self.tacks = tacks
-        self.jibes = jibes
+        self.gybes = gybes
         self.transitions_port = transitions_port
         self.transitions_starboard = transitions_starboard
 
     # set stats object
     def set_stats(self):
+        """
+        Crashes are from a kitefoil-focused source, and not really relevant for conventional
+        dinghies, but present here anyway. Anytime the boat goes from moving to stopped,
+        that is interpreted as a Crash.
+        """
         df = self.df
         stats = {}
 
@@ -292,16 +303,16 @@ class SailingSession:
                                                                                       "Tack"] == "Starboard")]) +
                                                               len(crashes_df[(crashes_df["Upwind"] == "Upwind") & (
                                                                           crashes_df["Tack"] == "Starboard")]))
-            stats["port_jibe_success_percent"] = np.float64(100) * len(
-                transitions_df[(transitions_df["Maneuver"] == "Jibe") & (transitions_df["Tack"] == "Port")]) / (
-                                                         len(transitions_df[(transitions_df["Maneuver"] == "Jibe") & (
+            stats["port_gybe_success_percent"] = np.float64(100) * len(
+                transitions_df[(transitions_df["Maneuver"] == "Gybe") & (transitions_df["Tack"] == "Port")]) / (
+                                                         len(transitions_df[(transitions_df["Maneuver"] == "Gybe") & (
                                                                      transitions_df["Tack"] == "Port")]) +
                                                          len(crashes_df[(crashes_df["Upwind"] == "Downwind") & (
                                                                      crashes_df["Tack"] == "Port")]))
-            stats["starboard_jibe_success_percent"] = np.float64(100) * len(
-                transitions_df[(transitions_df["Maneuver"] == "Jibe") & (transitions_df["Tack"] == "Starboard")]) / (
+            stats["starboard_gybe_success_percent"] = np.float64(100) * len(
+                transitions_df[(transitions_df["Maneuver"] == "Gybe") & (transitions_df["Tack"] == "Starboard")]) / (
                                                               len(transitions_df[
-                                                                      (transitions_df["Maneuver"] == "Jibe") & (
+                                                                      (transitions_df["Maneuver"] == "Gybe") & (
                                                                                   transitions_df[
                                                                                       "Tack"] == "Starboard")]) +
                                                               len(crashes_df[(crashes_df["Upwind"] == "Downwind") & (
