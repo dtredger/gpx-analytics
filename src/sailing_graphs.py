@@ -9,7 +9,10 @@ import plotly.graph_objects as go
 ### Map the sailing session
 # default trace color is stbd/port tack
 # markers for tacks, gybes, and crashes
-def render_chart(session, crash_enabled=False):
+# uses session.filtered_df for data, so modify df with widgets to use subset
+# of points
+def render_chart(session, crash_enabled=False, boat_enabled=False):
+    filtered_df = session.filtered_df
     """
     possible chart styles are:
         'open-street-map', 
@@ -21,39 +24,56 @@ def render_chart(session, crash_enabled=False):
         'stamen-watercolor'.
     """
     fig = px.line_mapbox(
-        session.df,
+        filtered_df,
         lat="latitude",
         lon="longitude",
         color="tack",
         line_group="segment",
         mapbox_style='carto-positron', #"open-street-map",
-        hover_data=["sog_kts", "cog", "distance_cumulative", "upwind"],
-        zoom=14,
+        hover_data=["timestamp", "sog_kts", "cog", "distance_cumulative", "upwind"],
+        zoom=16,
         height=1000
     )
+    # Filter out tacks not present in filtered dataFrame
+    filtered_tacks = session.filtered_df.index.intersection(session.tacks)
     fig.add_trace(go.Scattermapbox(
-        lat=session.df["latitude"][session.tacks],
-        lon=session.df["longitude"][session.tacks],
+        lat=filtered_df["latitude"][filtered_tacks],
+        lon=filtered_df["longitude"][filtered_tacks],
         mode="markers",
         marker=go.scattermapbox.Marker(size=10),
         name="Tack"
     ))
+        # Filter out tacks not present in filtered dataFrame        
+    filtered_gybes = session.filtered_df.index.intersection(session.gybes)
     fig.add_trace(go.Scattermapbox(
-        lat=session.df["latitude"][session.gybes],
-        lon=session.df["longitude"][session.gybes],
+        lat=filtered_df["latitude"][filtered_gybes],
+        lon=filtered_df["longitude"][filtered_gybes],
         mode="markers",
         marker=go.scattermapbox.Marker(size=10),
         name="Gybe"
     ))
-    if crash_enabled:
+    if boat_enabled:
         fig.add_trace(go.Scattermapbox(
-            lat=session.df["latitude"][session.crashes],
-            lon=session.df["longitude"][session.crashes],
+            lat=[filtered_df.iloc[0]["latitude"]],
+            lon=[filtered_df.iloc[0]["longitude"]],
+            mode="markers",
+            marker=go.scattermapbox.Marker(size=15), 
+                # symbol="bus"#,slaughterhouse"#,
+                # anglesrc=point["cog"]
+            name="Boat"
+        ))
+    if crash_enabled:
+        # Filter out tacks not present in filtered dataFrame
+        filtered_crashes = session.filtered_df.index.intersection(session.crashes)
+        fig.add_trace(go.Scattermapbox(
+            lat=filtered_df["latitude"][filtered_crashes],
+            lon=filtered_df["longitude"][filtered_crashes],
             mode="markers",
             marker=go.scattermapbox.Marker(size=10),
             name="Crash"
         ))
     fig.show()
+    return fig
 
 
 #  Add mean and 95% to polar chart for port and stbd
@@ -74,17 +94,15 @@ def add_traces_to_fig(fig, frame):
                                       fill='tonext'))
 
 # Polar diagram showing 
-def new_polar(session, wind_dir=False, bin_deg_size=3):
-    if wind_dir == False:
-        wind_dir = session.calculated_wind_dir
-    elif wind_dir == True:
-        wind_dir = session.preset_wind_dir
-
+def render_polar(session, bin_deg_size=3):
+    filtered_df = session.filtered_df
+    wind_dir = session.wind_dir
+    
     pf = pd.DataFrame(columns=['cog', 'top', 'mean', 'tack_raw'])
     bin_mod = round((bin_deg_size - 1) / 2)
 
     for x in range(0, 361):
-        rows = session.df.loc[session.df["cog"].isin([x-bin_mod, x, x+bin_mod])]
+        rows = filtered_df.loc[filtered_df["cog"].isin([x-bin_mod, x, x+bin_mod])]
         pf.loc[x] =  { 'cog': x, 
                        'top': rows.sog_kts.quantile(0.95), 
                        'mean': rows.sog_kts.quantile(0.5),
@@ -119,4 +137,7 @@ def new_polar(session, wind_dir=False, bin_deg_size=3):
     ).show()
 
 
-# new_polar(s)
+def render_speed(session):
+    fig = px.line(session.df, x="timestamp", y="sog_kts", title="Speed (kts)")
+    fig.update_traces(mode="markers+lines", hovertemplate=None)
+    fig.update_layout(hovermode=mode).show()

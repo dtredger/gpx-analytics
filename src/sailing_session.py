@@ -50,6 +50,8 @@ class SailingSession:
         self.set_segments()
         self.set_transitions()
         self.set_stats()
+        # Add ability to filter df with widgets
+        self.filtered_df = self.df
 
 
     ### Vakaros includes the following fields:
@@ -148,22 +150,22 @@ class SailingSession:
         if "wind_dir" in self.params:
             if self.debug:
                 print(f"using preset wind_dir {self.params['wind_dir']}")
-            self.preset_wind_dir = self.params["wind_dir"]
-
-        # Only points with speeds faster than min_sailing_kts will be used
-        # to calculate wind_direction
-        moving_locs = self.df["sog_kts"] > self.params["min_sailing_kts"]
-        self.calculated_wind_dir = wind_direction(
-                self.df[moving_locs]["cog"].values, 
-                self.df[moving_locs]["sog_kts"].values
-            )
-        if self.debug:
-            print(f"calculated wind_dir as {self.calculated_wind_dir}")
+            self.wind_dir = self.params["wind_dir"]
+        else:
+            # Only points with speeds faster than min_sailing_kts will be used
+            # to calculate wind_direction
+            moving_locs = self.df["sog_kts"] > self.params["min_sailing_kts"]
+            self.wind_dir = wind_direction(
+                    self.df[moving_locs]["cog"].values, 
+                    self.df[moving_locs]["sog_kts"].values
+                )
+            if self.debug:
+                print(f"calculated wind_dir as {self.wind_dir}")
 
 
     # set VMG (based on straight upwind, straight downwind), and what tack we are on (1 for Starboard)
-    def set_vmg_tack_direction(self, use_computed=True):
-        wind_dir = self.calculated_wind_dir if use_computed else self.preset_wind_dir
+    def set_vmg_tack_direction(self):
+        wind_dir = self.wind_dir
 
         self.df["vmg_kts"] = np.cos((self.df["cog"] - wind_dir) * np.pi / 180) * self.df["sog_kts"]
         # negative VMG indicates moving downwind
