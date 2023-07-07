@@ -252,17 +252,21 @@ def link_chart_graph(chart, graph, session):
     brushintsel.observe(update_range, 'selected')
 
 
-def seaborn_violin(session, metric='cog'):
+def seaborn_violin(session, metric='cog', dots_enabled=False):
     """
-    display violin diagram of metrics split by segment.
+    display violin diagram of metrics split by segment and colour coded 
+    by upwind/downwind.
+    Includes ability to render indivdual metric points with `dots_enabled`
+
     Use slider to set filtered_df because otherwise the graph is overstuffed
     matplotlib.show() call is required to display 
     """
     violin = sns.catplot(data=session.filtered_df, kind='violin', inner=None, 
-                         palette="pastel", aspect=4, #hue='upwind',
-                         x="segment", y=metric, ) 
-    sns.stripplot(data=session.filtered_df, color="k", jitter=True, size=0.5,
-                  x="segment", y=metric, ax=violin.ax)
+                         palette="pastel", aspect=4, hue='upwind',
+                         x="segment", y=metric, )
+    if dots_enabled:
+        sns.stripplot(data=session.filtered_df, color="k", jitter=True, size=0.5,
+                      x="segment", y=metric, ax=violin.ax)
     plt.show()
 
 
