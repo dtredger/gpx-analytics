@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from ipywidgets import Button, HTML, HBox, VBox, Checkbox, FileUpload, Label, Output, IntSlider, Layout, Image, link
-from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl
+from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl, AntPath
 
 from bqplot import Axis, Figure, Lines, LinearScale, DateScale
 from bqplot.interacts import IndexSelector
@@ -28,11 +28,13 @@ Methods available for charting are:
 def ipyleaflet_chart(session):
     """
     Plot the GPS trace on an ipyleaflet map.
-    Include waypoints if provided
+    Include waypoints if provided.
+
+    Colours will be separated by tack. Dashed lines (AntPath) for downwind
     """
     lat_lng_pts = session.filtered_df[['latitude', 'longitude']].values
-    mean_lat = session.filtered_df.median().latitude
-    mean_lng = session.filtered_df.median().longitude
+    mean_lat = session.filtered_df.median(numeric_only=True).latitude
+    mean_lng = session.filtered_df.median(numeric_only=True).longitude
 
     # create the map
     m = Map(center=(mean_lat, mean_lng), 
