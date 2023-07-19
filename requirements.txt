@@ -1,0 +1,12 @@
+bqplot
+ipyleaflet
+ipywidgets
+jupyterlab
+nodejs
+gpxpy
+python
+srtm
+voila
+geopy
+matplotlib
+plotly
