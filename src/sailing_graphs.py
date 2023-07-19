@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from ipywidgets import Button, HTML, HBox, VBox, Checkbox, FileUpload, Label, Output, IntSlider, Layout, Image, link
-from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl, AntPath
+from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl, AntPath, Popup
 
 from bqplot import Axis, Figure, Lines, LinearScale, DateScale
 from bqplot.interacts import IndexSelector
@@ -25,54 +25,199 @@ Methods available for charting are:
 """
 
 
-def ipyleaflet_chart(session):
+def segment_is_upwind(rows):
+    return True if np.mean(rows.upwind) >= 0 else False
+
+
+def speed_fraction(df, rows):
+    mean = np.mean(df['sog_kts'])
+    if np.mean(rows.sog_kts) > mean:
+        return 4
+    else:
+        return 2
+
+    
+# Match coordinates pair to a point in the dataframe
+# Latitudes will be from the clicked location on the map, 
+# and not match points specifically. Clicked map points return
+# 14 decimals (eg: 43.634773071709375), vakaros provides 6: (43.640782)
+# create a range (via `jiggle`) to match at least one point
+def match_coords(df, coords, jiggle=0.00001):
+    lat, lon = [round(pt, 6) for pt in coords]
+
+    lat_floor, lat_ceil = [lat-jiggle, lat+jiggle]
+    lon_floor, lon_ceil = [lon-jiggle, lon+jiggle]
+
+    return df[ (df['latitude'].between(lat_floor, lat_ceil)) & 
+               (df['longitude'].between(lon_floor, lon_ceil)) ]
+
+
+def point_from_coords(df, coords):
+    matches = match_coords(df, coords)
+    if len(matches) == 0:
+        matches = match_coords(df, coords, jiggle=0.00010)
+        if len(matches) == 0:
+            matches = match_coords(df, coords, jiggle=0.00100)
+    return matches.iloc[0]
+
+
+def html_table(point):
+    return HTML(value=f"""<table>
+                            <tr>
+                                <td><b>Timestamp</b></td>
+                                <td>{point.timestamp.strftime('%X')}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Reading No., Segment</b></td>
+                                <td>{point.name} - {int(point.segment)}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Speed (kts)</b></td>
+                                <td>{point.sog_kts}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Heading</b></td>
+                                <td>{point.hdg_true}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Course over Ground</b></td>
+                                <td>{point.cog}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Roll & Pitch</b></td>
+                                <td>{point.roll}, {point.pitch}</td>
+                            </tr>
+                            <tr>
+                                <td><b>VMG (kts)</b></td>
+                                <td>{point.vmg_kts}</td>
+                            </tr>
+                            <tr>
+                                <td><b>Cumulative Distance (m)</b></td>
+                                <td>{round(point.distance_cumulative, 2)}</td>
+                            </tr>
+                            <tr>
+                                <td><b>lat/lon pair</b></td>
+                                <td>[{point.latitude}, {point.longitude}]</td>
+                            </tr>
+                          </table>""")
+
+
+
+
+def ipyleaflet_chart(session, height_pix='500'):
     """
     Plot the GPS trace on an ipyleaflet map.
     Include waypoints if provided.
 
     Colours will be separated by tack. Dashed lines (AntPath) for downwind
     """
-    lat_lng_pts = session.filtered_df[['latitude', 'longitude']].values
     mean_lat = session.filtered_df.median(numeric_only=True).latitude
     mean_lng = session.filtered_df.median(numeric_only=True).longitude
 
     # create the map
     m = Map(center=(mean_lat, mean_lng), 
-            zoom=15, 
+            zoom=15,
+            layout=Layout(width='100%', height=f"{height_pix}px"),
             basemap=basemaps.CartoDB.Positron) #Stamen.Terrain)
 
-    # show trace
-    # Attribute Default Value Doc
-    # locations [[]] List of list of points of the polygon
-    # stroke True Set it to False to disable borders
-    # color “#0033FF” Stroke color
-    # opacity 1.0 Stroke opacity
-    # weight 5 Stroke width in pixels
-    # fill True Whether to fill the polyline or not
-    # fill_color “#0033FF”
-    # fill_opacity 0.2
-    # dash_array
-    # line_cap “round”
-    # line_join “round”
-    line = Polyline(locations=[[[p[0], p[1]] for p in lat_lng_pts],],
-                    color = "red", fill=False, weight=1)
-    m.add_layer(line)
+    markers = []
+    def line_click_handler(**kwargs):
+        point = point_from_coords(session.filtered_df, kwargs['coordinates'])
 
+        popup = Popup(
+            location=[point.latitude, point.longitude],
+            child=html_table(point),
+            close_button=False,
+            auto_close=False,
+            close_on_escape_key=False
+        )
+        m.add_layer(popup)
+
+        # line_marker = Marker(location=[point.latitude, point.longitude],
+        #                      draggable=False, popup=html_table(point))
+        # m.add_layer(line_marker)
+
+        
+    segments = {}        
+    for x in range(int(session.filtered_df.iloc[1].segment), int(session.filtered_df.iloc[-1].segment)+1):
+        segments[x] = []
+
+    for ix, row in session.filtered_df.iterrows():
+        segments[row.segment] += [[row.latitude, row.longitude]]
+        
+    for seg_key in segments:
+        rows = session.df[session.df['segment'] == seg_key]
+        # tacks are indicated by 1 / -1 for port / stbd
+        seg_colour = 'red' if rows.iloc[0].tack > 0 else 'green'
+        
+        # use antpath (striped line) for downwind
+        if segment_is_upwind(rows):
+            line = Polyline(locations=segments[seg_key], 
+                            color = seg_colour, fill=False, weight=speed_fraction(session.filtered_df, rows))
+        else:  
+            line = AntPath(locations=segments[seg_key], color = seg_colour, 
+                             fill=False, weight=speed_fraction(session.filtered_df, rows), paused=True)
+    
+        line.on_click(line_click_handler)
+        m.add_layer(line)
+    
+    # session.tacks (and gybes) contain the index of the first point
+    # on the new tack.
+    # Use reddish for stbd-> port
+    # greenish for port->stbd
+    def transition_colour(tack, type='tack'):
+        reddish = '#f56042'
+        greenish = '#36e036'
+        green_gybe = '#36e0b8'
+        red_gybe = '#e08536'
+        if type == 'gybe':
+            return green_gybe if tack > 0 else red_gybe
+        else:
+            return greenish if tack > 0 else reddish
+    
     # add markers
-    waypoints = [
-        Marker(location=(lat_lng_pts[0], lat_lng_pts[1]), title='TEST TITLE',
-               popup=HTML(value='TEST'), draggable=False)
-        for point in [] # TODO
-    ]
+    waypoints = []
+
+    # tacks
+    for ix in session.tacks:
+        if ix in session.filtered_df.index:
+            row = session.filtered_df.loc[ix]
+            marker = CircleMarker(location=(row.latitude, row.longitude),
+                                  title='Tack', 
+                                  radius=2,
+                                  color=transition_colour(row.tack),
+                                  popup=HTML(value=f"Tack to start segment {row.segment}"), 
+                                  draggable=False)
+            waypoints += [marker]
+        
+    # gybes
+    for ix in session.gybes:
+        if ix in session.filtered_df.index:
+            row = session.filtered_df.loc[ix]
+            marker = CircleMarker(location=(row.latitude, row.longitude), 
+                                  title='Gybe', 
+                                  radius=2,
+                                  color=transition_colour(row.tack, 'gybe'),
+                                  popup=HTML(value=f"Gybe to start segment {row.segment}"), 
+                                  draggable=False)
+            waypoints += [marker]
+        
     waypoints_layer = LayerGroup(layers=waypoints)
     m.add_layer(waypoints_layer)
     
+    
+    # legend
+    # legend = LegendControl({"low":"#FAA", "medium":"#A55", "High":"#500"}, 
+    #                        name="Legend", position="bottomright")
+    # m.add_control(legend)
+
+    
     # add a checkbox to show / hide waypoints
-    waypoints_checkbox = Checkbox(value=True, description='Show Waypoints')
+    waypoints_checkbox = Checkbox(value=True, description='Show Maneuvers')
     
     def update_visible(change):
         for p in waypoints:
-            p.visible = change['new']
+            p.stroke = change['new']
     
     waypoints_checkbox.observe(update_visible, 'value')
     waypoint_control = WidgetControl(widget=waypoints_checkbox, position='bottomright')
@@ -88,6 +233,13 @@ def ipyleaflet_chart(session):
         primary_length_unit = 'kilometers'
     )
     m.add_control(measure)
+    
+    # def handle_click(**kwargs):
+    #     # print(kwargs)
+    #     if kwargs.get('type') == 'click':
+    #         m.add_layer(Marker(location=kwargs.get('coordinates')))
+    # m.on_interaction(handle_click)
+        
     return m
 
 
@@ -146,7 +298,7 @@ def add_traces_to_fig(fig, frame):
     for quantile in ["top", "mean"]:
         fig.add_trace(go.Scatterpolar(r = frame[quantile],
                                       theta = frame['cog'],
-                                      mode = 'lines',
+                                      mode = 'lines+markers',
                                       name = quantile,
                                       line_color = colour[quantile],
                                       # connectgaps=True,
@@ -175,10 +327,10 @@ def bqplot_graph(session, metrics=['sog_kts'], x_scale='time'):
     x_scale.allow_padding = False
     
     x_ax = Axis(label='Time', scale=x_scale)
-    y_ax = Axis(label='SOG (kts)', scale=y_scale, orientation='vertical')
+    y_ax = Axis(label=metrics[0], scale=y_scale, orientation='vertical')
     
-    lines = Lines(x=px, y=py, scales={'x': x_scale, 'y': y_scale}, stroke_width=1,
-                  colors=['blue'], fill='bottom', fill_opacities=[.7])
+    lines = Lines(x=px, y=py, scales={'x': x_scale, 'y': y_scale}, stroke_width=2,
+                  colors=['blue'], fill='bottom', fill_opacities=[.8])
 
     # lines_2 = Lines(x=px, y=py_2, scales={'x': x_scale, 'y': y_scale}, colors=['green'])
     
@@ -254,21 +406,28 @@ def link_chart_graph(chart, graph, session):
     brushintsel.observe(update_range, 'selected')
 
 
-def seaborn_violin(session, metric='cog', dots_enabled=False):
+def seaborn_violin(session, metric='cog', dots_enabled=False, omit_stationary=True):
     """
     display violin diagram of metrics split by segment and colour coded 
     by upwind/downwind.
     Includes ability to render indivdual metric points with `dots_enabled`
+    omit_stationary leaves out segments with speed < min_sailing_kts
 
     Use slider to set filtered_df because otherwise the graph is overstuffed
     matplotlib.show() call is required to display 
     """
-    violin = sns.catplot(data=session.filtered_df, kind='violin', inner=None, 
+    if omit_stationary:
+        df = session.filtered_df[session.filtered_df['upwind'] != 0]
+    else:
+        df = session.filtered_df
+
+    violin = sns.catplot(data=df, kind='violin', inner=None, 
                          palette="pastel", aspect=4, hue='upwind',
                          x="segment", y=metric, )
     if dots_enabled:
-        sns.stripplot(data=session.filtered_df, color="k", jitter=True, size=0.5,
+        sns.stripplot(data=df, color="k", jitter=True, size=0.5,
                       x="segment", y=metric, ax=violin.ax)
+    plt.grid()
     plt.show()
 
 
