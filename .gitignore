@@ -104,3 +104,8 @@ venv.bak/
 .mypy_cache/
 
 /tmp
+
+# ignore example files
+/examples/friday_night_races
+/examples/harbourmaster
+/examples/laser
