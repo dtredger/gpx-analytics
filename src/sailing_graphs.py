@@ -6,12 +6,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from ipywidgets import Button, HTML, HBox, VBox, Checkbox, FileUpload, Label, Output, IntSlider, Layout, Image, link
-from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl, AntPath, Popup
+from ipyleaflet import basemaps, FullScreenControl, LayerGroup, Map, MeasureControl, Polyline, Marker, CircleMarker, WidgetControl, AntPath, Popup, DrawControl
 
 from bqplot import Axis, Figure, Lines, LinearScale, DateScale
 from bqplot.interacts import IndexSelector
 
 import seaborn as sns
+
+
+from utils import *
 
 """
 Methods available for charting are:
@@ -104,7 +107,7 @@ def html_table(point):
 
 
 
-def ipyleaflet_chart(session, height_pix='500'):
+def ipyleaflet_chart(session, height_pix='500', add_measurement=False):
     """
     Plot the GPS trace on an ipyleaflet map.
     Include waypoints if provided.
@@ -116,7 +119,7 @@ def ipyleaflet_chart(session, height_pix='500'):
 
     # create the map
     m = Map(center=(mean_lat, mean_lng), 
-            zoom=15,
+            zoom=17,
             layout=Layout(width='100%', height=f"{height_pix}px"),
             basemap=basemaps.CartoDB.Positron) #Stamen.Terrain)
 
@@ -226,13 +229,14 @@ def ipyleaflet_chart(session, height_pix='500'):
     # enable full screen mode
     m.add_control(FullScreenControl())
         
-    # add measure control
-    measure = MeasureControl(
-        position='bottomleft',
-        active_color = 'orange',
-        primary_length_unit = 'kilometers'
-    )
-    m.add_control(measure)
+    if add_measurement:
+        # add measure control
+        measure = MeasureControl(
+            position='bottomleft',
+            active_color = 'orange',
+            primary_length_unit = 'kilometers'
+        )
+        m.add_control(measure)
     
     # def handle_click(**kwargs):
     #     # print(kwargs)
@@ -240,6 +244,26 @@ def ipyleaflet_chart(session, height_pix='500'):
     #         m.add_layer(Marker(location=kwargs.get('coordinates')))
     # m.on_interaction(handle_click)
         
+    # Add ability to draw a course axis (then add it to session info)
+    # includes coordinates like [[-79.373221, 43.646749], [-79.367251, 43.646663]], with longitude
+    # first for some reason (so reverse)
+    def draw_callback(self, **kwargs):
+        coords_list = kwargs['geo_json']['geometry']['coordinates']
+        session.course_points = [pt[::-1] for pt in coords_list]
+        pt_1, pt_2 = [tuple(pt) for pt in session.course_points]
+        session.course_axis = calculate_initial_compass_bearing(pt_1, pt_2)
+
+    draw_control = DrawControl()
+    draw_control.polyline =  {
+        "shapeOptions": {
+            "color": "#222222",
+            "weight": 2,
+            "opacity": 0.7
+        }
+    }
+    draw_control.on_draw(draw_callback)
+    m.add_control(draw_control)
+
     return m
 
 
@@ -306,7 +330,7 @@ def add_traces_to_fig(fig, frame):
                                       fill='tonext'))
 
 
-def bqplot_graph(session, metrics=['sog_kts'], x_scale='time'):
+def bqplot_graph(session, metrics=['sog_kts', 'vmg_kts'], x_scale='time'):
     """
     Return a graph for the given metric(s) based on the session gps trace
 
@@ -319,22 +343,25 @@ def bqplot_graph(session, metrics=['sog_kts'], x_scale='time'):
     else:
         px = session.filtered_df['distance_cumulative']
         x_scale = LinearScale()
-        
-    py = session.filtered_df[metrics]
-    # py_2 = session.filtered_df['hdg_true']
+    
+    x_scale.allow_padding = False
+    x_ax = Axis(label='Time', scale=x_scale)
     
     y_scale = LinearScale()
-    x_scale.allow_padding = False
-    
-    x_ax = Axis(label='Time', scale=x_scale)
     y_ax = Axis(label=metrics[0], scale=y_scale, orientation='vertical')
     
-    lines = Lines(x=px, y=py, scales={'x': x_scale, 'y': y_scale}, stroke_width=2,
-                  colors=['blue'], fill='bottom', fill_opacities=[.8])
+    line_py = Lines(x=px, y=session.filtered_df[metrics[0]], 
+                    scales={'x': x_scale, 'y': y_scale}, stroke_width=2,
+                    colors=['blue'], fill='inside', fill_opacities=[0.4])
+    marks = [line_py]
 
-    # lines_2 = Lines(x=px, y=py_2, scales={'x': x_scale, 'y': y_scale}, colors=['green'])
+    if len(metrics) > 1:
+        line_py_2 = Lines(x=px, y=session.filtered_df[metrics[1]], 
+                          scales={'x': x_scale, 'y': y_scale}, colors=['green'],
+                          fill='inside', fill_opacities=[0.4])
+        marks.append(line_py_2)
     
-    graph = Figure(title='Speed Chart', axes=[x_ax, y_ax], marks=[lines], #, lines_2],
+    graph = Figure(title='Speed Chart', axes=[x_ax, y_ax], marks=marks,
                   legend_location="top-right", display_legend=True)
     graph.layout.width = 'auto'
     graph.layout.height = 'auto'
@@ -423,7 +450,7 @@ def seaborn_violin(session, metric='cog', dots_enabled=False, omit_stationary=Tr
 
     violin = sns.catplot(data=df, kind='violin', inner=None, 
                          palette="pastel", aspect=4, hue='upwind',
-                         x="segment", y=metric, )
+                         x="segment", y=metric)
     if dots_enabled:
         sns.stripplot(data=df, color="k", jitter=True, size=0.5,
                       x="segment", y=metric, ax=violin.ax)

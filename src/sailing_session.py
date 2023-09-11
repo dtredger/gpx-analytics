@@ -16,6 +16,8 @@ np.seterr('raise')
 class SailingSession:
     default_params = {
         "debug": True,
+        "start":0,
+        "end": None,
         # "wind_dir":
         "min_sailing_kts": 1.0,
         "window_size": 5, # TODO: should be time, not number of points?
@@ -23,10 +25,12 @@ class SailingSession:
         # "timezone": "US/Eastern"
     }
 
-    ### Load data from file. 
-    # If data is not included, speed and course data can be calculated.
-    # There is no way to infer: hdg_true, roll, or pitch
     def __init__(self, file_path, params={}):
+        """
+        Load data from file. 
+        If data is not included, speed and course data can be calculated.
+        There is no way to infer: hdg_true, roll, or pitch
+        """
         self.params = self.default_params | params
         self.debug = self.params["debug"]
 
@@ -37,6 +41,9 @@ class SailingSession:
                 gpx = gpxpy.parse(f)
                 self.process_gpx_file(gpx)
 
+        # Set Sample rate
+        self.set_sample_rate()
+
         # Set basic dataframe params
         self.add_distances()
         self.add_time_steps()
@@ -44,22 +51,37 @@ class SailingSession:
         self.calculate_sog_kts()
         self.calculate_leeway()
 
-        # # Infer more complex things
-        self.set_inferred_wind_dir()
-        self.set_vmg_tack_direction()
+        # Add ability to filter df with widgets
+        self.filtered_df = self.df
+        self.course_points = []
+        self.course_axis = None
+
+        # Infer more complex things
+        self.infer_data()
+        self.filtered_df = self.df
+
+    def infer_data(self, start=0, end=None):
+        """
+        Use data to make inferences about other data or actions.
+        When the dataframe is filtered, these inferences should be 
+        recalculated.
+        """
+        self.df = self.filtered_df.loc[start:end].copy()
+        self.infer_wind_dir()
+        self.infer_course_axis()
+        self.infer_vmg_tack_direction()
         self.set_maneuver_data()
         self.set_segments()
         self.set_transitions()
         self.set_stats()
-        # Add ability to filter df with widgets
-        self.filtered_df = self.df
+
 
 
     ### Vakaros includes the following fields:
     # timestamp, latitude, longitude, sog_kts, cog, hdg_true, roll, pitch
     def from_vakaros_csv(self, file_path):
         ### Format for time string: '%Y-%m-%dT%H:%M:%S.%f'
-        self.df = pd.read_csv(file_path, parse_dates=['timestamp'])     
+        self.raw_df = pd.read_csv(file_path, parse_dates=['timestamp'])
 
 
     ### Generic GPX Files contain: 
@@ -68,10 +90,18 @@ class SailingSession:
     def process_gpx_file(self, gpx):
         # gpx_points = self.gpx.routes[0].points
         gpx_points = gpx.tracks[0].segments[0].points
-        self.df = pd.DataFrame.from_records([
+        self.raw_df = pd.DataFrame.from_records([
                 (pt.time, pt.latitude, pt.longitude) for pt in gpx_points
             ], columns=['timestamp', 'latitude', 'longitude'])
 
+
+    def set_sample_rate(self, sample_rate='0.5S'):
+        """
+        Create an average for the given sample_rate to smooth the data and reduce the number
+        of data points to be plotted on the map.
+        Resampling will set timestamp as the index, so reset to restore a numeric index.
+        """
+        self.df = self.raw_df.resample(sample_rate, on='timestamp').mean().bfill().reset_index()
 
     # Calculate the distance from one lat/lon point to the next, in meters,
     # and the cumulative distance. Return calculation time.
@@ -90,7 +120,7 @@ class SailingSession:
         # a distance step of 50m = almost 200kts (given avg time_diff of 0.5)
         self.df = self.df[self.df["distance_step"] < 50].reset_index(drop=True)
         
-        self.df["distance_cumulative"] = np.cumsum(self.df["distance_step"])
+        self.df.loc[:, "distance_cumulative"] = np.cumsum(self.df["distance_step"])
         if self.debug: 
             print(f'add_distances elapsed: {time.time() - start_time} s.')
 
@@ -112,7 +142,7 @@ class SailingSession:
         for i in range(1, len(self.df))]
 
         # cumulative time from first point
-        self.df["time_elapsed_sec"] = np.cumsum(self.df["time_diff"])
+        self.df.loc[:, "time_elapsed_sec"] = np.cumsum(self.df["time_diff"])
 
         if self.debug: 
             print(f'add_time_steps elapsed: {time.time() - start_time} s.')
@@ -130,7 +160,7 @@ class SailingSession:
         heading_decimals = 1
         start_time = time.time()
         # compass bearing between this point and previous point
-        self.df["cog"] = [0.0] + [round(calculate_initial_compass_bearing(
+        self.df.loc[:, "cog"] = [0.0] + [round(calculate_initial_compass_bearing(
             (self.df.loc[i - 1].latitude, self.df.loc[i - 1].longitude),
             (self.df.loc[i].latitude, self.df.loc[i].longitude)), heading_decimals)
         for i in range(1, len(self.df))]
@@ -155,17 +185,29 @@ class SailingSession:
             print(f'calculate_sog_kts elapsed: {time.time() - start_time} s.')
 
 
-    # calculate the difference between heading and course over ground
-    # requires hdg_true to be set (from gps)
     def calculate_leeway(self):
-        self.df['leeway'] = abs(self.df['cog'] - self.df['hdg_true'])
+        """
+        calculate the difference between heading and course over ground
+        requires hdg_true to be set (from gps).
+        sog, cog and hd_true are columns 4, 5 and 6 in the row
+        """
+        def leeway_calc(row):
+            if row[3] < self.params['min_sailing_kts']:
+                return 0
+            diff = abs(row[4] - row[5])
+            if diff > 180:
+                diff = 360 - diff
+            return diff
+
+        self.df.loc[:, 'leeway'] = self.df.apply(leeway_calc, axis=1)
+        
 
 
     ### set specified and computed wind directions
     # Wind direction can be set manually with a `wind_dir` session param 
     # 
     # Direction is compass heading set to `self.calculated_wind_dir` 
-    def set_inferred_wind_dir(self):
+    def infer_wind_dir(self):
         if "wind_dir" in self.params:
             if self.debug:
                 print(f"using preset wind_dir {self.params['wind_dir']}")
@@ -179,18 +221,28 @@ class SailingSession:
                     self.df[moving_locs]["sog_kts"].values
                 )
             if self.debug:
-                print(f"calculated wind_dir as {self.wind_dir}")
+                print(f"inferred wind_dir as: {self.wind_dir} degrees")
 
+    def infer_course_axis(self):
+        """
+        Set the course from lwd to windward mark, based on line between two marks.
+        """
+        if len(self.course_points) == 2:
+            pt_1, pt_2 = [tuple(pt) for pt in self.course_points]
+            self.course_axis = calculate_initial_compass_bearing(pt_1, pt_2)
+            print(f"inferred course axis from line between leeward & windward mark as {self.course_axis} degrees")
+        else:
+            print("no points to infer course axis from")
 
     # set VMG (based on straight upwind, straight downwind), and what tack we are on (1 for Starboard)
     # TODO: allow course axis to be different from wind_dir
-    def set_vmg_tack_direction(self):
+    def infer_vmg_tack_direction(self):
         course_axis = self.wind_dir
 
-        self.df["vmg_kts"] = np.cos((self.df["cog"] - course_axis) * np.pi / 180) * self.df["sog_kts"]
+        self.df.loc[:, "vmg_kts"] = np.cos((self.df.loc[:, "cog"] - course_axis) * np.pi / 180) * self.df.loc[:, "sog_kts"]
         # negative VMG indicates moving downwind
-        self.df["upwind"] = np.sign(self.df["vmg_kts"])
-        self.df["tack_raw"] = [1 if ((cog - course_axis) % 360) < 180 else -1 for cog in self.df["cog"]]
+        self.df.loc[:, "upwind"] = np.sign(self.df.loc[:, "vmg_kts"])
+        self.df.loc[:, "tack_raw"] = [1 if ((cog - course_axis) % 360) < 180 else -1 for cog in self.df["cog"]]
 
  
     # *** un-cleaned up methods ***
@@ -207,8 +259,8 @@ class SailingSession:
                                     self.df["upwind"].values, 
                                     self.params)
 
-        self.df["is_moving"] = maneuvers["is_moving"]
-        self.df["tack"] = maneuvers["tack"]
+        self.df.loc[:, "is_moving"] = maneuvers["is_moving"]
+        self.df.loc[:, "tack"] = maneuvers["tack"]
 
         self.crashes = maneuvers["crashes"]
         self.port_crashes = maneuvers["port_crashes"]
@@ -225,23 +277,20 @@ class SailingSession:
     # also start new segments for roundings (from upwind -> downwind, or reverse)
     # TODO - this duplicates the maneuvers calculation
     def set_segments(self):
-        segment = np.ones(len(self.df))
-        this_segment = 1
-        for i in range(1, len(self.df)):
-            # if tack changed from previous point, a new segment starts
-            if self.df.loc[i - 1, "tack"] != self.df.loc[i, "tack"]:
-                this_segment += 1
-            # ensure upwind has changed for last 6 points and is still moving
-            # elif (
-            #     (self.df.loc[i - 1, "upwind"] != self.df.loc[i, "upwind"]) and (
-            #         np.abs(np.sum(self.df.loc[i-5:i, "upwind"])) == 6) and (
-            #         self.df.loc[i, "is_moving"] != 0)):
-            #     this_segment += 1
+        df = self.df
+        segment = 1
 
-            segment[i] = this_segment
-        self.df["segment"] = segment
-        # 1 is Upwind, -1 is Downwind, and 0 is not moving
-        self.df["upwind"] = self.df["is_moving"] * self.df["upwind"]
+        def has_tacked(index):
+            try:
+                if index == 0: return False
+                return df.loc[index, 'tack'] != df.loc[index - 1, 'tack']
+            except KeyError:
+                return False
+
+        for index, row in df.iterrows():
+            if has_tacked(index):
+                segment += 1
+            df.loc[index, 'segment'] = segment
 
     # Set transition data
     # Creates transitions_df dataframe
@@ -252,14 +301,14 @@ class SailingSession:
         transitions_starboard = []
         transitions = []
 
-        tack = df["tack"][0]
-        upwind = df["upwind"][0]
+        tack = df["tack"].iloc[0]
+        upwind = df["upwind"].iloc[0]
 
         tacks = []
         gybes = []
         roundings = []
 
-        for i in range(len(df)):
+        for i, row in df.iterrows():
             if tack != df["tack"][i]:
                 if tack == 1 and df["tack"][i] == -1:
                     transitions_port.append(i)

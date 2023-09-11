@@ -12,10 +12,11 @@ Sailing analytics relies on:
 - Polar diagram (speed vs True Wind angle)
 - 
 
-Run it with 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/jtpio/voila-gpx-viewer/master?urlpath=voila%2Frender%2Fapp.ipynb)
+Run it with:
 
-or [Google Colab:](https://colab.research.google.com/github/dtredger/gpx-analytics/blob/master/app.ipynb)
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/dtredger/gpx-analytics/HEAD?labpath=%2Fapp.ipynb)
+or 
+[Google Colab:](https://colab.research.google.com/github/dtredger/gpx-analytics/blob/master/app.ipynb)
 
 
 ## Usage
